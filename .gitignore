@@ -1,0 +1,40 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+
+# MediaPipe WASM copied from node_modules on postinstall
+src/renderer/public/wasm/
+
+# MediaPipe .task models downloaded on postinstall
+# src/renderer/public/models/*.task
+
+# Logs & cache
+*.log*
+.eslintcache
+
+# Environment
+.env
+
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/settings.json
+
+.prettierignore
+.prettierrc.yaml
+eslint.config.mjs
+.editorconfig
+
+paper
+
+.vscode/
+slides/

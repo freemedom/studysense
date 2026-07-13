@@ -1,0 +1,18 @@
+export const LOCATION_RADIUS_LABEL = 'Effective radius'
+export const STRICT_RULE_DELETE_NOTICE = 'Strict rule added; can delete after 20 seconds'
+
+export const SYNC_SECTION_TITLE = 'Cloud sync'
+export const SYNC_UNCONFIGURED_HINT =
+  'Supabase not configured. Copy .env.example to .env, set VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY (EXPO_PUBLIC_* on mobile), then run supabase/context_sync.sql in the Supabase SQL Editor.'
+export const SYNC_TOKEN_LABEL = 'Sync code'
+export const SYNC_CREATE_BTN = 'Create sync code'
+export const SYNC_JOIN_BTN = 'Join sync'
+export const SYNC_NOW_BTN = 'Sync now'
+export const SYNC_DISCONNECT_BTN = 'Disconnect'
+export const SYNC_TOKEN_COPIED = 'Sync code copied to clipboard'
+export const SYNC_JOIN_PLACEHOLDER = 'Paste sync code'
+export const SYNC_PAIRED_HINT = 'Paired'
+export const SYNC_LAST_SYNCED = 'Last synced'
+export const SYNC_NEVER = 'Not synced yet'
+export const SYNC_CONFLICT_NOTICE = 'Sync conflict; kept the newer version'
+export const CONTEXT_SOURCE_SYNC = 'Cross-device sync (strictest wins)'
