@@ -8,7 +8,9 @@ import type {
   MoodSignals,
   PostureAlertCounts,
   PostureBaseline,
-  SessionSummary
+  SessionSummary,
+  SessionTimeline,
+  TimelineTrack
 } from '../types/metrics'
 import { emptyMoodEvents, emptyPostureAlertCounts } from '../types/metrics'
 import type { GazeMoodEventCounts } from '../types/gazeLab'
@@ -16,6 +18,7 @@ import { emptyGazeMoodEvents } from '../types/gazeLab'
 import { isWebGazerUsable, useGazeStore } from './gazeStore'
 import { loadSessions, saveSession } from '../utils/sessionStorage'
 import { exportSessionDebugCsv } from '../utils/sessionDebugExport'
+import { useContextStore } from './contextStore'
 
 interface SessionState {
   isRunning: boolean
@@ -34,6 +37,7 @@ interface SessionState {
   alertMessage: string | null
   showBreak: boolean
   breakSecondsLeft: number
+  breakLatchDismissed: boolean
   calibrationPhase: CalibrationPhase
   calibrationSecondsLeft: number
   calibrationMessage: string | null
@@ -46,12 +50,12 @@ interface SessionState {
   headOffsetRatio: number
   postureScore: number
   postureAlerts: PostureAlertCounts
-  showPostureHint: boolean
   sessionStart: number | null
   distanceAlerts: number
   moodEvents: MoodEventCounts
   gazeMoodEvents: GazeMoodEventCounts
   history: SessionSummary[]
+  timeline: SessionTimeline | null
   setReady: (ready: boolean) => void
   setError: (error: string | null) => void
   toggleMesh: () => void
@@ -60,6 +64,7 @@ interface SessionState {
   finishCalibration: (baseline: PostureBaseline, usedFallback: boolean) => void
   cancelCalibration: () => void
   stopSession: () => void
+  dismissBreak: () => void
   updateMetrics: (metrics: {
     blinkCount: number
     blinksPerMinute: number
@@ -80,9 +85,9 @@ interface SessionState {
     forwardRatio: number
     headOffsetRatio: number
     postureScore: number
-    showPostureHint: boolean
     calibrationSecondsLeft?: number
   }) => void
+  pushTimelineEvent: (track: TimelineTrack, value: string) => void
   loadHistory: () => void
 }
 
@@ -103,6 +108,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   alertMessage: null,
   showBreak: false,
   breakSecondsLeft: 0,
+  breakLatchDismissed: false,
   calibrationPhase: 'idle',
   calibrationSecondsLeft: 0,
   calibrationMessage: null,
@@ -115,12 +121,12 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   headOffsetRatio: 0,
   postureScore: 0,
   postureAlerts: emptyPostureAlertCounts(),
-  showPostureHint: false,
   sessionStart: null,
   distanceAlerts: 0,
   moodEvents: emptyMoodEvents(),
   gazeMoodEvents: emptyGazeMoodEvents(),
   history: loadSessions(),
+  timeline: null,
 
   setReady: (ready) => set({ isReady: ready }),
   setError: (error) => set({ error }),
@@ -144,7 +150,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       gazeMoodEvents: emptyGazeMoodEvents(),
       alertMessage: null,
       showBreak: false,
-      showPostureHint: false
+      breakLatchDismissed: false,
+      timeline: null
     }),
 
   beginCalibrationRecording: () =>
@@ -157,11 +164,22 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     if (isWebGazerUsable()) {
       useGazeStore.getState().setSessionGazeEnabled(true)
     }
+    const sessionStart = Date.now()
     set({
       calibrationPhase: 'done',
       postureBaseline: baseline,
       isRunning: true,
-      sessionStart: Date.now(),
+      sessionStart,
+      timeline: {
+        startedAtMs: sessionStart,
+        events: [
+          { tMs: sessionStart, track: 'mood', value: 'unknown' },
+          { tMs: sessionStart, track: 'distance', value: 'none' },
+          { tMs: sessionStart, track: 'posture', value: 'none' },
+          { tMs: sessionStart, track: 'gazeMood', value: 'unknown' },
+          { tMs: sessionStart, track: 'blinkRate', value: 'warming_up' }
+        ]
+      },
       calibrationMessage: usedFallback
         ? 'Not enough calibration samples — using default posture baseline'
         : 'Posture calibration complete'
@@ -169,13 +187,17 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   cancelCalibration: () =>
-    set({
-      calibrationPhase: 'idle',
-      calibrationSecondsLeft: 0,
-      calibrationMessage: null
+    set(() => {
+      if (useContextStore.getState().activeMode === 'strict') return {}
+      return {
+        calibrationPhase: 'idle',
+        calibrationSecondsLeft: 0,
+        calibrationMessage: null
+      }
     }),
 
   stopSession: () => {
+    if (useContextStore.getState().activeMode === 'strict') return
     const state = get()
     if (state.sessionStart) {
       const durationSec = Math.max(Math.round((Date.now() - state.sessionStart) / 1000), 1)
@@ -198,7 +220,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           offScreenRatio: gaze.offScreenRatio,
           gazeDispersion: gaze.gazeDispersion,
           saccadeRatePerMin: gaze.saccadeRatePerMin
-        }
+        },
+        timeline: state.timeline ? { ...state.timeline, events: [...state.timeline.events] } : undefined
       }
       saveSession(summary)
       set({ history: loadSessions() })
@@ -221,8 +244,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
       calibrationMessage: null,
       postureBaseline: null,
       moodSignals: null,
-      showPostureHint: false,
-      gazeMoodEvents: emptyGazeMoodEvents()
+      showBreak: false,
+      breakSecondsLeft: 0,
+      breakLatchDismissed: false,
+      gazeMoodEvents: emptyGazeMoodEvents(),
+      timeline: null
     })
     useGazeStore.getState().setSessionGazeEnabled(false)
     useGazeStore.getState().setProxyBaseline(null)
@@ -230,6 +256,23 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   },
 
   updateMetrics: (metrics) => set(metrics),
+
+  dismissBreak: () => set({ breakLatchDismissed: true, showBreak: false, breakSecondsLeft: 0 }),
+
+  pushTimelineEvent: (track, value) => {
+    const state = get()
+    if (!state.isRunning || !state.timeline) return
+
+    const lastForTrack = [...state.timeline.events].reverse().find((event) => event.track === track)
+    if (lastForTrack?.value === value) return
+
+    set({
+      timeline: {
+        ...state.timeline,
+        events: [...state.timeline.events, { tMs: Date.now(), track, value }]
+      }
+    })
+  },
 
   loadHistory: () => set({ history: loadSessions() })
 }))

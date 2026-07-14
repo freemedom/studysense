@@ -1,10 +1,14 @@
-import { useState } from 'react'
 import ContextModePanel from './ContextModePanel'
 import GazeLabPanel from './GazeLabPanel'
 import MetricsPanel from './MetricsPanel'
 import SessionHistoryPanel from './SessionHistoryPanel'
 
-type SidePanelTab = 'live' | 'context' | 'gaze' | 'history'
+export type SidePanelTab = 'live' | 'context' | 'gaze' | 'history'
+
+interface SidePanelTabsProps {
+  activeTab: SidePanelTab
+  onTabChange: (tab: SidePanelTab) => void
+}
 
 const TABS: { id: SidePanelTab; label: string }[] = [
   { id: 'live', label: 'Live' },
@@ -13,9 +17,10 @@ const TABS: { id: SidePanelTab; label: string }[] = [
   { id: 'history', label: 'History' }
 ]
 
-export default function SidePanelTabs(): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<SidePanelTab>('live')
-
+export default function SidePanelTabs({
+  activeTab,
+  onTabChange
+}: SidePanelTabsProps): React.JSX.Element {
   return (
     <div className="side-panel-tabs">
       <div className="side-panel-tab-bar" role="tablist" aria-label="Side panel">
@@ -26,7 +31,7 @@ export default function SidePanelTabs(): React.JSX.Element {
             role="tab"
             className={`side-panel-tab${activeTab === tab.id ? ' active' : ''}`}
             aria-selected={activeTab === tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => onTabChange(tab.id)}
           >
             {tab.label}
           </button>

@@ -1,5 +1,7 @@
 export const BLINK_EAR_THRESHOLD = 0.21
 export const BLINK_RATE_LOW = 10
+export const BLINK_RATE_HIGH = 20
+export const BLINK_RATE_BAND_HOLD_MS = 5_000
 export const EAR_TIRED = 0.14 // look down will cause ear ratio to be lower
 export const HEAD_JITTER_RESTLESS = 0.05
 export const BROW_RESTLESS = 0.2
@@ -17,7 +19,10 @@ export const EAR_TIRED_SUSTAIN_RATIO = 0.55
 export const FACE_RATIO_NEAR = 0.42
 export const FACE_RATIO_FAR = 0.20
 export const FATIGUE_BREAK_SECONDS = 20
+export const BREAK_TOO_NEAR_HOLD_MS = 10_000
 export const BLINK_HISTORY_MS = 60_000
+/** Vision loop interval when window is hidden/minimized (RAF is paused). ~30 Hz */
+export const VISION_LOOP_BACKGROUND_MS = 33
 export const SESSIONS_STORAGE_KEY = 'studylens_sessions'
 export const SESSION_HISTORY_MAX = 50
 
@@ -25,7 +30,8 @@ export const POSTURE_CALIBRATION_MS = 5000
 export const FORWARD_RATIO_DELTA = 0.12
 export const HEAD_OFFSET_DELTA = 0.06
 export const SHOULDER_UNEVEN_DELTA = 0.04
-export const POSTURE_ALERT_HOLD_MS = 3000
+
+export const NOTIFICATION_COOLDOWN_MS = 60_000
 
 /** @deprecated No longer used for classification; kept for debug display compatibility. */
 export const FORWARD_HEAD_DELTA = 12

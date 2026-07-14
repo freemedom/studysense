@@ -3,15 +3,15 @@
 A camera-based study assistant for laptop webcams. Built with Electron, React, and TypeScript.
 
 - **Desktop (this repo)** — real-time vision: blinks, mood/fatigue, screen distance, posture
-- **[Mobile companion](https://github.com/freemedom/studylens-mobile)** — WiFi / location context rules on Android / iOS
+- **[Mobile companion](https://github.com/freemedom/studysense-mobile)** — WiFi / location context rules on Android / iOS
 - **Cloud (optional)** — Supabase sync for context rules between desktop and mobile
 
 All vision processing runs **locally in the renderer**; camera frames are not uploaded.
 
 ## Demo
 
-- [Project slides](https://docs.google.com/presentation/d/1C5eNNUWXng0RtmJmvUmrnEkZSoLq_Etm/edit?usp=sharing&ouid=116714933071213276438&rtpof=true&sd=true)
-- [Demo video](https://drive.google.com/file/d/17-tTwxC-2ILy9_ENaE8CO3YOl8bG9Q2l/view?usp=sharing)
+- [Project slides]
+- [Demo video]
 
 ## Features
 

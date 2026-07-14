@@ -1,4 +1,8 @@
 import { useEffect } from 'react'
+import {
+  BREAK_NOTIFICATION_BODY,
+  BREAK_NOTIFICATION_TITLE
+} from '../constants/alertCopy'
 import { useSessionStore } from '../store/sessionStore'
 
 export default function BreakOverlay(): React.JSX.Element | null {
@@ -12,9 +16,17 @@ export default function BreakOverlay(): React.JSX.Element | null {
   // Including `showBreak` keeps the listener in sync with overlay visibility and satisfies the Rules of Hooks.
   useEffect(() => {
     if (!showBreak) return
+    void window.api.setBreakFullscreen(true)
+    return () => {
+      void window.api.setBreakFullscreen(false)
+    }
+  }, [showBreak])
+
+  useEffect(() => {
+    if (!showBreak) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.code === 'Space') {
-        useSessionStore.setState({ showBreak: false, breakSecondsLeft: 0 })
+        useSessionStore.getState().dismissBreak()
       }
     }
     window.addEventListener('keydown', onKey)
@@ -26,8 +38,8 @@ export default function BreakOverlay(): React.JSX.Element | null {
   return (
     <div className="break-overlay">
       <div className="break-card">
-        <h2>Rest your eyes</h2>
-        <p>Look about 6 meters away and relax for 20 seconds (20-20-20 rule)</p>
+        <h2>{BREAK_NOTIFICATION_TITLE}</h2>
+        <p>{BREAK_NOTIFICATION_BODY}</p>
         <div className="break-timer">{breakSecondsLeft}</div>
         <p className="break-hint">Press Space to dismiss early</p>
       </div>

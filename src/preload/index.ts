@@ -21,7 +21,21 @@ const api = {
   writeSessionDebugExport: (payload: {
     filename: string
     content: string
-  }): Promise<string> => ipcRenderer.invoke('debug:writeSessionExport', payload)
+  }): Promise<string> => ipcRenderer.invoke('debug:writeSessionExport', payload),
+  showNotification: (payload: {
+    title: string
+    body: string
+    tag: string
+  }): Promise<boolean> => ipcRenderer.invoke('notification:show', payload),
+  focusMainWindow: (): Promise<void> => ipcRenderer.invoke('window:focusMain'),
+  setBreakFullscreen: (enter: boolean): Promise<void> =>
+    ipcRenderer.invoke('window:setBreakFullscreen', enter),
+  setStrictCloseLock: (locked: boolean): Promise<void> =>
+    ipcRenderer.invoke('window:setStrictCloseLock', locked),
+  setStrictMinimizeLock: (locked: boolean): Promise<void> =>
+    ipcRenderer.invoke('window:setStrictMinimizeLock', locked),
+  setStrictAlwaysOnTopLock: (locked: boolean): Promise<void> =>
+    ipcRenderer.invoke('window:setStrictAlwaysOnTopLock', locked)
 }
 
 // With context isolation (recommended), only explicitly exposed globals reach the page.

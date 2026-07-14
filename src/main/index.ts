@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Notification } from 'electron'
 import { join } from 'path'
 import { mkdir, writeFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -16,9 +16,37 @@ function isGeolocationConfigured(): boolean {
   return Boolean(googleApiKey) || process.platform === 'darwin'
 }
 
+let mainWindow: BrowserWindow | null = null
+const activeNotifications = new Map<string, Notification>()
+let breakFullscreenActive = false
+let strictCloseLock = false
+let strictMinimizeLock = false
+let strictAlwaysOnTopLock = false
+
+function focusMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.show()
+  mainWindow.focus()
+}
+
+function setBreakFullscreen(enter: boolean): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  if (enter) {
+    focusMainWindow()
+    mainWindow.setFullScreen(true)
+    breakFullscreenActive = true
+    return
+  }
+  if (breakFullscreenActive) {
+    mainWindow.setFullScreen(false)
+    breakFullscreenActive = false
+  }
+}
+
 function createWindow(): void {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     minWidth: 900,
@@ -28,13 +56,31 @@ function createWindow(): void {
     ...(process.platform === 'linux' ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false // Being blocked or minimized doesn't work.
     }
   })
 
+  mainWindow.webContents.setBackgroundThrottling(false)
+
   mainWindow.on('ready-to-show', () => {
-    mainWindow.maximize()
-    mainWindow.show()
+    mainWindow?.maximize()
+    mainWindow?.show()
+  })
+
+  mainWindow.on('close', (e) => {
+    if (!strictCloseLock) return
+    e.preventDefault()
+    focusMainWindow()
+  })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+    activeNotifications.clear()
+    breakFullscreenActive = false
+    strictCloseLock = false
+    strictMinimizeLock = false
+    strictAlwaysOnTopLock = false
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -73,6 +119,62 @@ app.whenReady().then(() => {
   ipcMain.handle('context:getWifiSSID', async () => getWifiSSID())
   ipcMain.handle('context:getPlatform', () => process.platform)
   ipcMain.handle('context:isGeolocationConfigured', () => isGeolocationConfigured())
+
+  ipcMain.handle(
+    'notification:show',
+    (_event, payload: { title: string; body: string; tag: string }) => {
+      if (!Notification.isSupported()) return false
+
+      const previous = activeNotifications.get(payload.tag)
+      if (previous) {
+        previous.close()
+        activeNotifications.delete(payload.tag)
+      }
+
+      const notification = new Notification({
+        title: payload.title,
+        body: payload.body,
+        silent: false
+      })
+
+      notification.on('click', () => {
+        focusMainWindow()
+      })
+      notification.on('close', () => {
+        if (activeNotifications.get(payload.tag) === notification) {
+          activeNotifications.delete(payload.tag)
+        }
+      })
+
+      activeNotifications.set(payload.tag, notification)
+      notification.show()
+      return true
+    }
+  )
+
+  ipcMain.handle('window:focusMain', () => {
+    focusMainWindow()
+  })
+
+  ipcMain.handle('window:setBreakFullscreen', (_event, enter: boolean) => {
+    setBreakFullscreen(enter)
+  })
+
+  ipcMain.handle('window:setStrictCloseLock', (_event, locked: boolean) => {
+    strictCloseLock = Boolean(locked)
+  })
+
+  ipcMain.handle('window:setStrictMinimizeLock', (_event, locked: boolean) => {
+    strictMinimizeLock = Boolean(locked)
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.setMinimizable(!strictMinimizeLock)
+  })
+
+  ipcMain.handle('window:setStrictAlwaysOnTopLock', (_event, locked: boolean) => {
+    strictAlwaysOnTopLock = Boolean(locked)
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.setAlwaysOnTop(strictAlwaysOnTopLock, 'screen-saver')
+  })
 
   if (is.dev) {
     ipcMain.handle(

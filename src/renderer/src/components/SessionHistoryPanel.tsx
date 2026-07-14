@@ -11,6 +11,7 @@ import type {
 } from '../types/metrics'
 import type { GazeMoodEventCounts } from '../types/gazeLab'
 import { formatDuration, formatSessionWhen } from '../utils/sessionFormat'
+import SessionTimeline from './SessionTimeline'
 
 const MOOD_ORDER: SessionMood[] = ['focused', 'tired', 'restless', 'distracted']
 
@@ -52,6 +53,7 @@ interface SessionCardProps {
   postureAlerts: PostureAlertCounts
   gazeMoodEvents?: GazeMoodEventCounts
   gazeSummary?: GazeSessionSummary
+  timeline?: SessionSummary['timeline']
   liveDuration?: boolean
   sessionStart?: number | null
 }
@@ -67,6 +69,7 @@ function SessionCard({
   postureAlerts,
   gazeMoodEvents,
   gazeSummary,
+  timeline,
   liveDuration,
   sessionStart
 }: SessionCardProps): React.JSX.Element {
@@ -185,6 +188,7 @@ function SessionCard({
           </div>
         </div>
       )}
+      <SessionTimeline timeline={timeline} durationSec={displayDuration} />
     </div>
   )
 }
@@ -202,6 +206,7 @@ function HistorySessionCard({ session }: { session: SessionSummary }): React.JSX
       postureAlerts={session.postureAlerts}
       gazeMoodEvents={session.gazeMoodEvents ?? session.attentionEvents}
       gazeSummary={session.gazeSummary}
+      timeline={session.timeline}
     />
   )
 }

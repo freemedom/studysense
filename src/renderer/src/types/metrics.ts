@@ -68,6 +68,21 @@ export interface GazeSessionSummary {
   saccadeRatePerMin: number
 }
 
+export type BlinkRateBand = 'warming_up' | 'low' | 'normal' | 'high'
+
+export type TimelineTrack = 'mood' | 'gazeMood' | 'distance' | 'posture' | 'blinkRate'
+
+export interface SessionTimelineEvent {
+  tMs: number
+  track: TimelineTrack
+  value: string
+}
+
+export interface SessionTimeline {
+  startedAtMs: number
+  events: SessionTimelineEvent[]
+}
+
 export interface SessionSummary {
   id: string
   startedAt: string
@@ -82,6 +97,7 @@ export interface SessionSummary {
   /** @deprecated legacy key from localStorage — use gazeMoodEvents */
   attentionEvents?: import('./gazeLab').GazeMoodEventCounts
   gazeSummary?: GazeSessionSummary
+  timeline?: SessionTimeline
 }
 
 export function emptyMoodEvents(): MoodEventCounts {

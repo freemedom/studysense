@@ -1,8 +1,9 @@
 import { useEffect, useRef } from 'react'
-import { FATIGUE_BREAK_SECONDS, JAW_OPEN_YAWN, POSTURE_ALERT_HOLD_MS } from '../constants/thresholds'
+import { BREAK_TOO_NEAR_HOLD_MS, BLINK_RATE_BAND_HOLD_MS, FATIGUE_BREAK_SECONDS, JAW_OPEN_YAWN, VISION_LOOP_BACKGROUND_MS } from '../constants/thresholds'
 import { useSessionStore } from '../store/sessionStore'
 import type {
   ActivePostureIssue,
+  BlinkRateBand,
   DistanceStatus,
   Mood,
   MoodSignals,
@@ -25,6 +26,7 @@ import {
 import { detectPose, initPoseLandmarker } from '../vision/poseLandmarker'
 import { requestCameraStream, VisionInitError } from '../utils/visionInitError'
 import { setSharedCameraStream } from '../utils/cameraStreamRegistry'
+import { encodePostureTimelineValue, computeBlinkRateBand } from '../utils/timelineSegments'
 
 function computeFatigueLevel(
   blinksPerMinute: number,
@@ -108,12 +110,16 @@ export function useVisionLoop(
   const blinkDetector = useRef(new BlinkDetector())
   const expressionEstimator = useRef(new ExpressionEstimator())
   const postureCalibrator = useRef(new PostureCalibrator())
-  const breakEndTime = useRef<number | null>(null)
+  const breakLatched = useRef(false)
+  const breakStartedAt = useRef<number | null>(null)
+  const tooNearSince = useRef<number | null>(null)
   const lastTimestamp = useRef(0)
   const prevDistance = useRef<DistanceStatus>('none')
   const prevMood = useRef<Mood>('unknown')
   const prevPostureIssues = useRef<ActivePostureIssue[]>([])
-  const badPostureSince = useRef<number | null>(null)
+  const committedBlinkRateBand = useRef<BlinkRateBand>('warming_up')
+  const pendingBlinkRateBand = useRef<BlinkRateBand | null>(null)
+  const pendingBlinkRateBandSince = useRef<number | null>(null)
   const lastPostureLogAt = useRef(0)
   const prevPostureDebugIssues = useRef<ActivePostureIssue[]>([])
   const loadingRef = useRef(true)
@@ -131,16 +137,24 @@ export function useVisionLoop(
       prevDistance.current = 'none'
       prevMood.current = 'unknown'
       prevPostureIssues.current = []
-      badPostureSince.current = null
+      committedBlinkRateBand.current = 'warming_up'
+      pendingBlinkRateBand.current = null
+      pendingBlinkRateBandSince.current = null
+      tooNearSince.current = null
+      breakLatched.current = false
+      breakStartedAt.current = null
     }
   }, [isRunning])
 
   useEffect(() => {
     const unsub = useSessionStore.subscribe((state, prev) => {
+      if (state.breakLatchDismissed && !prev.breakLatchDismissed) {
+        breakLatched.current = false
+        breakStartedAt.current = null
+      }
       if (state.calibrationPhase === 'running' && prev.calibrationPhase !== 'running') {
         postureCalibrator.current.start(Date.now())
         prevPostureIssues.current = []
-        badPostureSince.current = null
       }
       if (state.calibrationPhase === 'idle' && prev.calibrationPhase !== 'idle') {
         postureCalibrator.current.reset()
@@ -151,8 +165,19 @@ export function useVisionLoop(
 
   useEffect(() => {
     let rafId = 0
+    let intervalId = 0
     let stream: MediaStream | null = null
     let cancelled = false
+    let visibilityHandler: (() => void) | null = null
+
+    const stopScheduler = (): void => {
+      cancelAnimationFrame(rafId)
+      rafId = 0
+      if (intervalId) {
+        clearInterval(intervalId)
+        intervalId = 0
+      }
+    }
 
     async function setup(): Promise<void> {
       try {
@@ -189,18 +214,18 @@ export function useVisionLoop(
         setReady(true)
         loadingRef.current = false
 
-        const loop = (): void => {
+        const processFrame = (): void => {
           if (cancelled || !videoRef.current) return
 
           const video = videoRef.current
           const canvas = canvasRef.current
           // `now` — monotonic high-res clock (ms since page load). Required by MediaPipe
-          // VIDEO mode (detectFace/detectPose) and to skip duplicate RAF ticks.
+          // VIDEO mode (detectFace/detectPose) and to skip duplicate ticks.
           const now = performance.now()
           // `wallNow` — real-world epoch ms. Used for blink history, calibration/break
-          // countdowns, and posture-hold debounce (compare with Date-based deadlines).
+          // countdowns, and session timing (compare with Date-based deadlines).
           const wallNow = Date.now()
-          
+
           if (video.readyState >= 2 && now !== lastTimestamp.current) {
             lastTimestamp.current = now
             const faceResult = detectFace(video, now)
@@ -262,10 +287,7 @@ export function useVisionLoop(
                     }
                   }
                 }
-
-                return void (rafId = requestAnimationFrame(loop))
-              }
-
+              } else {
               const blink = blinkDetector.current.update(landmarks, wallNow)
               const faceRatio = estimateFaceRatio(landmarks)
               const distanceStatus = estimateDistanceStatus(faceRatio)
@@ -298,16 +320,6 @@ export function useVisionLoop(
                   )
                 : null
 
-              let showPostureHint = false
-              if (isRunning && isBadPosture(postureIssues)) {
-                if (!badPostureSince.current) badPostureSince.current = wallNow
-                if (wallNow - badPostureSince.current >= POSTURE_ALERT_HOLD_MS) {
-                  showPostureHint = true
-                }
-              } else {
-                badPostureSince.current = null
-              }
-
               if (
                 isRunning &&
                 distanceStatus !== 'good' &&
@@ -318,12 +330,18 @@ export function useVisionLoop(
                   distanceAlerts: s.distanceAlerts + 1
                 }))
               }
+              if (isRunning && prevDistance.current !== distanceStatus) {
+                useSessionStore.getState().pushTimelineEvent('distance', distanceStatus)
+              }
               prevDistance.current = distanceStatus
 
               if (isRunning && mood !== 'unknown' && mood !== prevMood.current) {
                 useSessionStore.setState((s) => ({
                   moodEvents: { ...s.moodEvents, [mood]: s.moodEvents[mood] + 1 }
                 }))
+              }
+              if (isRunning && mood !== prevMood.current) {
+                useSessionStore.getState().pushTimelineEvent('mood', mood)
               }
               prevMood.current = mood
 
@@ -339,28 +357,84 @@ export function useVisionLoop(
                   })
                 }
               }
-              prevPostureIssues.current = postureIssues
-
-              let showBreak = false
-              let breakSecondsLeft = 0
               if (
                 isRunning &&
-                fatigueLevel >= 0.6 &&
+                !postureIssuesEqual(postureIssues, prevPostureIssues.current)
+              ) {
+                useSessionStore
+                  .getState()
+                  .pushTimelineEvent('posture', encodePostureTimelineValue(postureIssues))
+              }
+              prevPostureIssues.current = postureIssues
+
+              if (isRunning) {
+                const blinkRateBand = computeBlinkRateBand(
+                  blink.blinksPerMinute,
+                  blink.blinkRateReady
+                )
+                if (blinkRateBand === committedBlinkRateBand.current) {
+                  pendingBlinkRateBand.current = null
+                  pendingBlinkRateBandSince.current = null
+                } else if (blinkRateBand !== pendingBlinkRateBand.current) {
+                  pendingBlinkRateBand.current = blinkRateBand
+                  pendingBlinkRateBandSince.current = wallNow
+                } else if (
+                  pendingBlinkRateBandSince.current !== null &&
+                  wallNow - pendingBlinkRateBandSince.current >= BLINK_RATE_BAND_HOLD_MS
+                ) {
+                  useSessionStore.getState().pushTimelineEvent('blinkRate', blinkRateBand)
+                  committedBlinkRateBand.current = blinkRateBand
+                  pendingBlinkRateBand.current = null
+                  pendingBlinkRateBandSince.current = null
+                }
+              }
+
+              if (isRunning && distanceStatus === 'too_near') {
+                if (!tooNearSince.current) tooNearSince.current = wallNow
+              } else {
+                tooNearSince.current = null
+              }
+
+              const tooNearHeld =
+                tooNearSince.current !== null &&
+                wallNow - tooNearSince.current >= BREAK_TOO_NEAR_HOLD_MS
+
+              const breakTriggerReady =
+                isRunning &&
+                !store.breakLatchDismissed &&
+                !breakLatched.current &&
+                tooNearHeld &&
                 distanceStatus === 'too_near' &&
                 blink.blinkRateReady &&
                 blink.blinksPerMinute < 12
-              ) {
-                if (!breakEndTime.current) {
-                  breakEndTime.current = wallNow + FATIGUE_BREAK_SECONDS * 1000
+
+              if (breakTriggerReady) {
+                breakLatched.current = true
+                breakStartedAt.current = wallNow
+              }
+
+              if (!breakLatched.current && distanceStatus !== 'too_near') {
+                useSessionStore.setState({ breakLatchDismissed: false })
+              }
+
+              let showBreak = false
+              let breakSecondsLeft = 0
+              if (breakLatched.current && isRunning && breakStartedAt.current !== null) {
+                const elapsedSec = Math.floor((wallNow - breakStartedAt.current) / 1000)
+                if (elapsedSec >= FATIGUE_BREAK_SECONDS) {
+                  breakLatched.current = false
+                  breakStartedAt.current = null
+                  if (!store.breakLatchDismissed) {
+                    useSessionStore.setState({
+                      breakLatchDismissed: true,
+                      showBreak: false,
+                      breakSecondsLeft: 0
+                    })
+                  }
+                } else {
+                  showBreak = true
+                  breakSecondsLeft = FATIGUE_BREAK_SECONDS - elapsedSec
                 }
-                showBreak = true
-                breakSecondsLeft = Math.max(
-                  0,
-                  Math.ceil((breakEndTime.current - wallNow) / 1000)
-                )
-                if (breakSecondsLeft <= 0) breakEndTime.current = null
-              } else {
-                breakEndTime.current = null
               }
 
               updateMetrics({
@@ -382,8 +456,7 @@ export function useVisionLoop(
                 shoulderTiltDeg: postureMetrics.shoulderTiltDeg,
                 forwardRatio: postureMetrics.forwardRatio,
                 headOffsetRatio: postureMetrics.headOffsetRatio,
-                postureScore: postureMetrics.postureScore,
-                showPostureHint
+                postureScore: postureMetrics.postureScore
               })
 
               if (canvas && showMesh) {
@@ -416,6 +489,7 @@ export function useVisionLoop(
               } else if (canvas) {
                 const ctx = canvas.getContext('2d')
                 ctx?.clearRect(0, 0, canvas.width, canvas.height)
+              }
               }
             } else {
               if (calibrating) {
@@ -461,18 +535,36 @@ export function useVisionLoop(
                 forwardRatio: 0,
                 headOffsetRatio: 0,
                 postureScore: 0,
-                showPostureHint: false,
                 calibrationSecondsLeft: calibrating
                   ? postureCalibrator.current.getSecondsLeft(wallNow)
                   : undefined
               })
             }
           }
-
-          rafId = requestAnimationFrame(loop)
         }
 
-        loop()
+        const rafLoop = (): void => {
+          if (cancelled) return
+          processFrame()
+          if (!cancelled) rafId = requestAnimationFrame(rafLoop)
+        }
+
+        const startScheduler = (): void => {
+          stopScheduler()
+          if (cancelled) return
+          if (document.hidden) {
+            intervalId = window.setInterval(processFrame, VISION_LOOP_BACKGROUND_MS)
+          } else {
+            rafId = requestAnimationFrame(rafLoop)
+          }
+        }
+
+        visibilityHandler = (): void => {
+          startScheduler()
+        }
+
+        document.addEventListener('visibilitychange', visibilityHandler)
+        startScheduler()
       } catch (err) {
         console.error('[StudySense] Vision init failed:', err)
         const message =
@@ -489,7 +581,10 @@ export function useVisionLoop(
 
     return () => {
       cancelled = true
-      cancelAnimationFrame(rafId)
+      if (visibilityHandler) {
+        document.removeEventListener('visibilitychange', visibilityHandler)
+      }
+      stopScheduler()
       stream?.getTracks().forEach((t) => t.stop())
       setSharedCameraStream(null)
     }
