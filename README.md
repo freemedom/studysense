@@ -146,7 +146,7 @@ WASM binaries are copied on `npm install` to `src/renderer/public/wasm/`.
 
 ## Research tooling (optional)
 
-Script that role-plays student profiles via an OpenAI-compatible LLM to answer a StudySense questionnaire — for early need exploration only.
+Script that role-plays student profiles to answer a StudySense questionnaire — for early need exploration only.
 
 ```bash
 # Uses LLM_API_KEY / OPENAI_API_KEY from .env
